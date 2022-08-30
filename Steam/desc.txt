@@ -1,0 +1,27 @@
+This is a custom fix for a well known problem of not being able to raise the Commercial Happiness significantly above 80%. Happiness ratio is a sum of a few components like workers' health and wellbeing, stockpile, customers, etc. This mod changes how one of those components is calculated in a way that is imho the closest to the original concept and produces meaningful results.
+
+Source code at [url=https://github.com/Infixo/HappinessFix]GitHub[/url]
+
+I will add some more info, depending on the comments and questions. I will keep "TESTING" flag for some time and see if any problems would be reported.
+
+Performance impact is minimal but non-zero. Few extra calculations are needed to correct the original happiness and apply a new logic.
+
+[u]Compatibility[/u]
+It changes the method that implements simulation step for a commercial building.
+I am not aware of any popular mods that would be not compatible.
+
+[u]Detailed description[/u]
+
+Each commercial building is assigned up to 100 points (happiness) which is a sum of the following components.
+1. 25 pts - no problems at all.
+2. 20 pts - no major problems.
+3. Up to 15 pts for health and wellbeing of workers.
+4. Up to 20 points for goods in the magazine (not processed).
+5. Up to 20 points for goods processed and ready for customers.
+6. Few points for the taxation. This can be negative if taxes are too high.
+
+The above model works well except for part 5. The implementation of the selling process is done in such a way, that it is impossible to get here more that 5-7 points. 20 points is given if at any given moment all goods are sold. This is possible if customers would buy them at a rate as they are processed in a building. However this rate is HALF of the processing rate. So, there is virtually always a huge stockpile of goods that even fully visited building cannot sell on time.
+
+As a player we have no control over the internal speed and mechanics of goods processing. The only thing we can influence is the customer level. And this is what is used instead. The mod assignes up to 20 points based on how many visitors (customers) the building has compared to the maximum capacity. In a well managed city it is reasonable to have even 100% visitors and this scenario gives 20 points.
+
+You can also observe the relation between "no customers" warnings and the happiness (which totally makes sense). The "no customers" warning appears when there is less than half visitors. So, the happiness will be less than 10 points here.

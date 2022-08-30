@@ -1,7 +1,11 @@
-﻿using System.Reflection;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
 using UnityEngine;
-using ColossalFramework;
-using ColossalFramework.Math;
+//using ColossalFramework;
+//using ColossalFramework.Math;
+using ColossalFramework.Plugins;
 using HarmonyLib;
 
 namespace HappinessFix
@@ -14,77 +18,32 @@ namespace HappinessFix
         public static void PatchAll()
         {
             if (patched) { Debug.Log("PatchAll: already patched!"); return; }
-            //Harmony.DEBUG = true;
             var harmony = new Harmony(HarmonyId);
-            //harmony.PatchAll(typeof(HappinessFixPatcher).Assembly); // you can also do manual patching here!
             harmony.PatchAll(Assembly.GetExecutingAssembly());
             if (Harmony.HasAnyPatches(HarmonyId))
             {
-                Debug.Log("PatchAll: methods patched ok");
+                DebugOutputPanel.AddMessage(PluginManager.MessageType.Message, $"{HarmonyId} methods patched ok");
                 patched = true;
                 var myOriginalMethods = harmony.GetPatchedMethods();
                 foreach (var method in myOriginalMethods)
-                    Debug.Log($"...method {method.Name} from {method.Module}");
+                    DebugOutputPanel.AddMessage(PluginManager.MessageType.Message, $"{HarmonyId} ...method {method.Name}");
             }
             else
-                Debug.Log("ERROR PatchAll: methods not patched");
+                DebugOutputPanel.AddMessage(PluginManager.MessageType.Warning, $"{HarmonyId} ERROR: methods not patched");
         }
 
         public static void UnpatchAll()
         {
-            if (!patched) { Debug.Log("UnpatchAll: not patched!");  return; }
-            //Harmony.DEBUG = true;
+            if (!patched) { Debug.Log("UnpatchAll: not patched!"); return; }
             var harmony = new Harmony(HarmonyId);
             harmony.UnpatchAll(HarmonyId);
             patched = false;
-            //Harmony.DEBUG = false;
         }
+    }
 
-        // debug info
-        public static void DebugLogPatches()
-        {
-            Harmony.DEBUG = true;
-            /*
-            // To get a list of all patched methods in the current appdomain(yours and others), call GetAllPatchedMethods:
-            Debug.Log("==== ALL METHODS ====");
-            var originalMethods = Harmony.GetAllPatchedMethods();
-            foreach (var method in originalMethods)
-                Debug.Log($"Method {method.Name} from {method.Module}");
-            */
-            //If you are only interested in your own patched methods, use GetPatchedMethods:
-            Debug.Log("==== MY METHODS ====");
-            var harmony = new Harmony(HarmonyId);
-            var myOriginalMethods = harmony.GetPatchedMethods();
-            foreach (var method in myOriginalMethods)
-                Debug.Log($"Method {method.Name} from {method.Module}");
-            Harmony.DEBUG = false;
-        }
-/*
-        public static void DebugLogMethod(string method)
-        {
-            // get the MethodBase of the original
-            var original = typeof(TheClass).GetMethod("TheMethod");
-
-            // retrieve all patches
-            var patches = Harmony.GetPatchInfo(original);
-            if (patches is null) return; // not patched
-
-            // get a summary of all different Harmony ids involved
-            FileLog.Log("all owners: " + patches.Owners);
-
-            // get info about all Prefixes/Postfixes/Transpilers
-            foreach (var patch in patches.Prefixes)
-            {
-                FileLog.Log("index: " + patch.index);
-                FileLog.Log("owner: " + patch.owner);
-                FileLog.Log("patch method: " + patch.PatchMethod);
-                FileLog.Log("priority: " + patch.priority);
-                FileLog.Log("before: " + patch.before);
-                FileLog.Log("after: " + patch.after);
-            }
-        }
-*/
-}
+    /* 
+     * Old method that is easier to implement but technically less efficient
+     * 
     
     [HarmonyPatch(typeof(CommonBuildingAI))]
     public static class CommonBuildingAIPatches
@@ -188,6 +147,82 @@ namespace HappinessFix
             // a bit ugly hack for now...
             //ref District 
             instance.m_districts.m_buffer[district].m_commercialData.m_tempHappiness += (uint)(happiness * workPlaceCount);
+        }
+    }
+    *
+    * End of OLD METHOD
+    */
+
+    /*
+     * NEW METHOD USING TRANSPILER
+     * here we change only 1 line of code that contains an original formula
+     * 
+    // happiness.48 += num18.49 - Mathf.Min(num18.49, buildingData.m_customBuffer2 * num18.49 / num6.19);
+    -4 IL_0928: ldloc.s 48
+    -3 IL_092a: ldloc.s 49
+    -2 IL_092c: ldloc.s 49
+    -1 IL_092e: ldarg.2
+     0 IL_092f: ldfld uint16 Building::m_customBuffer2 // this is the 3rd occurence
+     1 IL_0934: ldloc.s 49
+     2 IL_0936: mul
+     3 IL_0937: ldloc.s 19
+     4 IL_0939: div
+     5 IL_093a: call int32[UnityEngine]UnityEngine.Mathf::Min(int32, int32)
+	 6 IL_093f: sub
+     7 IL_0940: add
+     8 IL_0941: stloc.s 48
+
+    // new formula to replace the existing one
+    happiness.48 += Mathf.Min(num18.49, num18.49 * aliveCount.14 / num3.16);
+    -4 [-] ldloc.s 48 // for +=
+    -3 [-] ldloc.s 49 // for Min
+    -2 [-] ldloc.s 49
+    -1 <nop>
+     0 <nop>
+     1 ldloc.s 14
+     2 [-] mul
+     3 ldloc.s 16
+     4 div
+     5 call int32[UnityEngine]UnityEngine.Mathf::Min(int32, int32)
+     6 <nop>
+     7 [-] add
+     8 [-] stloc.s 48
+*/
+    [HarmonyPatch(typeof(CommercialBuildingAI))]
+    [HarmonyPatch("SimulationStepActive")]
+    public static class CommercialBuildingAI_SimulationStepActive_Patch
+    {
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var codes = new List<CodeInstruction>(instructions);
+            int occurence = 0;
+            for (int i = 0; i < codes.Count; i++)
+            {
+                // find 3rd occurence of m_customBuffer2
+                if (codes[i].opcode == OpCodes.Ldfld && codes[i].operand == AccessTools.Field(typeof(Building), "m_customBuffer2"))
+                {
+                    //DebugOutputPanel.AddMessage(PluginManager.MessageType.Message, $"{i}: {codes[i].operand}");
+                    ++occurence;
+                    if (occurence == 3)
+                    {
+                        // new IL code here
+                        // i-4, i-3, i-2 are the same
+                        codes[i - 1] = new CodeInstruction(OpCodes.Nop);
+                        codes[i    ] = new CodeInstruction(OpCodes.Nop);
+                        codes[i + 1] = new CodeInstruction(OpCodes.Ldloc_S, 14);
+                        codes[i + 2] = new CodeInstruction(OpCodes.Mul);
+                        codes[i + 3] = new CodeInstruction(OpCodes.Ldloc_S, 16);
+                        codes[i + 4] = new CodeInstruction(OpCodes.Div);
+                        // codes[i + 5] = new CodeInstruction(); // call Matf.Min
+                        codes[i + 6] = new CodeInstruction(OpCodes.Nop);
+                        // i+7, i+8 are the same
+                        break; // no need to go further with analysis
+                    }
+                }
+                //DebugOutputPanel.AddMessage(PluginManager.MessageType.Message, $"<{i:X4}> {codes[i]}");
+                //var x = new CodeInstruction(OpCodes.Unbox);
+            }
+            return codes.AsEnumerable();
         }
     }
 }
